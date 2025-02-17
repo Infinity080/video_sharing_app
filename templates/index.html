@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Video Sharing App</title>
+    <script src="https://cdn.socket.io/4.5.1/socket.io.min.js"></script>
+    <style>
+        li {
+            margin: 5px 0;
+        }
+    </style>
+
+</head>
+<body>
+    <h1>Video Sharing App</h1>
+    <form action="/upload" method="post" enctype="multipart/form-data">
+        <input type="file" name="video" accept="video/*" required>
+        <button type="submit">Upload</button>
+    </form>
+
+    <form action="/play" method="post">
+        <label for="video-select">Choose a video:</label>
+        <select name="filename" id="video-select" required>
+            {% for video in videos %}
+            <option value="{{ video[1] }}">{{ video[1] }}</option>
+            {% endfor %}
+        </select>
+        <button type="submit">Play</button>
+    </form>    
+
+    <div id="current-video">
+        <h2>Now Playing:</h2>
+        <video id="video-player" controls width="600"></video>
+        <div id="controls">
+            <button id="play">Play</button>
+            <button id="pause">Pause</button>
+            <button id="fast-forward">+10s</button>
+            <button id="rewind">-10s</button>
+        </div>
+        <h2>Users:</h2>
+    </div>
+
+    <ul id="user-list"></ul>
+
+    <script>
+        const socket = io();
+        const videoPlayer = document.getElementById('video-player');
+        const rewindButton = document.getElementById('rewind');
+        const playButton = document.getElementById('play');
+        const pauseButton = document.getElementById('pause');
+        const fastForwardButton = document.getElementById('fast-forward');
+
+        let isSeeking = false; 
+        let isPausedByUser = false; 
+
+        socket.on('server_full', (data) => {
+            alert(data.message);
+        });
+
+        socket.on('new_video', (data) => {
+            videoPlayer.src = `/uploads/${data.filename}`;
+            videoPlayer.currentTime = data.timestamp;
+            if (data.is_playing) {
+                videoPlayer.play();
+            } else {
+                videoPlayer.pause();
+            }
+            isPausedByUser = false;  
+        });
+
+        socket.on('sync_time', (data) => {
+            if (!isSeeking) {
+                const timeDifference = Math.abs(videoPlayer.currentTime - data.timestamp);
+                if (timeDifference > .5) {
+                    videoPlayer.currentTime = data.timestamp;
+                }
+            }
+        });
+
+        socket.on('play_pause', (data) => {
+            if (data.is_playing) {
+                videoPlayer.play();
+            } else {
+                videoPlayer.pause();
+            }
+        });
+
+        videoPlayer.addEventListener('timeupdate', () => {
+            if (!isSeeking && !videoPlayer.paused) {
+                socket.emit('sync_time', { timestamp: videoPlayer.currentTime });
+            }
+        });
+
+        videoPlayer.addEventListener('seeking', () => {
+            isSeeking = true;
+        });
+
+        videoPlayer.addEventListener('seeked', () => {
+            isSeeking = false;
+            socket.emit('sync_time', { timestamp: videoPlayer.currentTime });
+        });
+
+        videoPlayer.addEventListener('pause', () => {
+            if (!isPausedByUser) {
+                socket.emit('play_pause', { is_playing: false });
+            }
+            isPausedByUser = true;
+        });
+
+        videoPlayer.addEventListener('play', () => {
+            if (isPausedByUser) {
+                socket.emit('play_pause', { is_playing: true });
+            }
+            isPausedByUser = false;
+        });
+
+        rewindButton.addEventListener('click', () => {
+            if (videoPlayer.currentTime-10 < 0) videoPlayer.currentTime = 0;
+            else videoPlayer.currentTime -= 10;
+        });
+
+        playButton.addEventListener('click', () => {
+            videoPlayer.play();
+        });
+
+        pauseButton.addEventListener('click', () => {
+            videoPlayer.pause();
+        });
+        
+        fastForwardButton.addEventListener('click', () => {
+            videoPlayer.currentTime += 10;
+        });
+
+        socket.on('update_users', function(data) {
+            const userList = document.getElementById('user-list');
+            userList.innerHTML = '';  
+
+            data.users.forEach(function(user, index) {
+                const li = document.createElement('li');
+                li.textContent = `User ${index + 1} - ${user.ip}`;
+                userList.appendChild(li);
+            });
+        });
+    </script>
+</body>
+</html>
